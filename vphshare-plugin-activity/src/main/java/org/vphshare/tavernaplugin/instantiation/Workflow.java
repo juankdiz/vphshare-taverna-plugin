@@ -428,7 +428,7 @@ public class Workflow {
     private String requestAtomicServiceId(String url) throws HttpException, IOException, WorkflowException {
         // Create request
         HttpClient client = new HttpClient();
-        HttpMethod method = new GetMethod(url + "/get_as_id");
+        HttpMethod method = new GetMethod(url + "/get_path_info");
 
         // Add authentication
         client.getParams().setAuthenticationPreemptive(true);
