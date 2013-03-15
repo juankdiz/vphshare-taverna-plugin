@@ -8,6 +8,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.InvocationTargetException;
+import java.math.BigInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,12 +41,17 @@ public class Workflow {
             super(description);
         }
     }
+    
+    private static class PathInfo {
+        private String atomicServiceId;
+        private String redirectionName;
+    }
 
     private static Logger logger = Logger.getLogger(Workflow.class);
 
     private Set<Object> atomicServiceUsers;
 
-    private TreeMap<String, AtomicServiceInstance> atomicServices;
+    private TreeMap<String, AtomicServiceInstance> sharableAtomicServices;
 
     private Credentials credentials;
 
@@ -68,7 +74,7 @@ public class Workflow {
         this.credentials = credentials;
         this.cloudFacadeId = cloudFacadeId;
         this.atomicServiceUsers = new TreeSet<Object>();
-        this.atomicServices = new TreeMap<String, AtomicServiceInstance>();
+        this.sharableAtomicServices = new TreeMap<String, AtomicServiceInstance>();
     }
 
     public Map<String, String> status() throws WorkflowException {
@@ -97,7 +103,16 @@ public class Workflow {
             JSONObject jsonObject = JSONObject.fromObject(jsonResponse);
             List<Object> asInstances = WorkflowRegister.propertyToList(jsonObject, "atomicServiceInstances");
             for (Object asInstance : asInstances) {
-                String asInstanceName = (String) PropertyUtils.getProperty(asInstance, "name");
+                // TODO: Depending on how the issue with the missing asInstanceId is resolved, we should use an
+                // instance specific id (this.asInstanceId or this.asInstanceName) for the asStatusMap. But at
+                // the moment we have neither: We don't know asInstanceId  because the HTTP method that adds
+                // the AS to the workflow doesn't return it. And we cannot use asInstanceName because the
+                // structure the is returned by the workflow status service doesn't contain the asInstanceName
+                // that we chose when we added the AS to the workflow.
+                // So right now we have to use the "atomicServiceId" - but this way we cannot
+                // distinguish 2 instances of the same AS :-(
+                String asInstanceName = (String) PropertyUtils.getProperty(asInstance, "atomicServiceId");
+                
                 String asInstanceStatus = (String) PropertyUtils.getProperty(asInstance, "status");
                 asStatusMap.put(asInstanceName, asInstanceStatus);
             }
@@ -318,9 +333,9 @@ public class Workflow {
         return result;
     }
 
-    public AtomicServiceInstance addAtomicService(String wsdlURL, Object user) throws WorkflowException {
+    public AtomicServiceInstance addAtomicService(String wsdlURL, Object user, boolean shared) throws WorkflowException {
         logger.info("addAtomicService");
-        VPHAtomicServiceInstance atomicService;
+        VPHAtomicService atomicService;
         try {
             atomicService = serviceURLtoAtomicServiceInstance(wsdlURL);
         } catch (HttpException e) {
@@ -332,13 +347,17 @@ public class Workflow {
             logger.error(message, e);
             throw new WorkflowException(message);
         }
-        if (!atomicServices.containsKey(atomicService.getId())) {
+        String asInstanceName = urlencode(user.toString() + ";" + wsdlURL);
+        asInstanceName = String.format("%040x", new BigInteger(asInstanceName.getBytes()));
+        String asInstanceId = null; // not known yet
+        VPHAtomicServiceInstance atomicServiceInstance = new VPHAtomicServiceInstance(atomicService, asInstanceId, asInstanceName, this);
+        if (!sharableAtomicServices.containsKey(atomicService.getId()) || !shared) {
             logger.info("AddAtomicService \"" + atomicService.getId() + "\"");
 
             String configId;
             try {
                 configId = getAtomicServiceConfigId(atomicService.getId());
-                atomicService.setAsConfigId(configId);
+                atomicServiceInstance.setAsConfigId(configId);
             } catch (UnsupportedEncodingException e) {
                 String message = "UnsupportedEncodingException while getting AtomicServiceConfigId: " + e.getMessage();
                 logger.error(message);
@@ -365,8 +384,7 @@ public class Workflow {
             client.getState().setCredentials(AuthScope.ANY, credentials);
 
             // Create a method instance
-            String url = "https://vph.cyfronet.pl/cloudfacade/workflow/" + cloudFacadeId + "/as/" + configId + "/"
-                    + urlencode(atomicService.getId());
+            String url = CloudFacadeConstants.CLOUDFACADE_URL + "/workflow/" + cloudFacadeId + "/as/" + configId + "/" + asInstanceName;
             PutMethod method = new PutMethod(url);
             try {
                 method.setRequestEntity(new StringRequestEntity(atomicService.getId(), CloudFacadeConstants.TEXT_CONTENT_TYPE, CloudFacadeConstants.TEXT_ENCODING_TYPE));
@@ -378,6 +396,7 @@ public class Workflow {
             WorkflowException ex = null;
             try {
                 // Execute the method
+                logger.debug("Executing PUT on URL \"" + method.getURI() + "\"");
                 int statusCode = client.executeMethod(method);
                 if (statusCode != HttpStatus.SC_OK && statusCode != HttpStatus.SC_NO_CONTENT) {
                     String message = "Method failed: " + method.getStatusLine() + "\n"
@@ -385,7 +404,14 @@ public class Workflow {
                     logger.error(message);
                     ex = new WorkflowException(message);
                 }
-                atomicServices.put(atomicService.getId(), atomicService);
+                if (shared) {
+                    // TODO: Maybe in a future version of CloudFacade we can obtain the asInstanceId from this HTTP call
+                    // and write it into the atomicServiceInstance object
+                    // atomicServiceInstance.setId(method.getResponseBodyAsString());
+                    
+                    sharableAtomicServices.put(atomicService.getId(), atomicServiceInstance);
+                }
+                atomicServiceUsers.add(user);
             } catch (HttpException e) {
                 String message = "HttpException while instantiating AtomicService" + e.getMessage();
                 logger.error(message);
@@ -401,19 +427,21 @@ public class Workflow {
             if (ex != null) {
                 throw ex;
             }
+            return atomicServiceInstance;
+        } else {
+            atomicServiceUsers.add(user);
+            return sharableAtomicServices.get(atomicService.getId());
         }
-        atomicServiceUsers.add(user);
-        return atomicServices.get(atomicService.getId());
     }
 
-    private VPHAtomicServiceInstance serviceURLtoAtomicServiceInstance(String wsdlURL) throws HttpException,
+    private VPHAtomicService serviceURLtoAtomicServiceInstance(String wsdlURL) throws HttpException,
             IOException, WorkflowException {
         Pattern p = Pattern.compile("http[s]?://vph\\.cyfronet\\.pl/cloudfacade/as/([^/]*)/endpoint/([^/])*/(.*)");
         Matcher m = p.matcher(wsdlURL);
         if (m.find()) {
             String servicePath = m.group(3);
-            String atomicServiceId = requestAtomicServiceId(wsdlURL);
-            return new VPHAtomicServiceInstance(atomicServiceId, this, servicePath);
+            PathInfo pathInfo = requestPathInfo(wsdlURL);
+            return new VPHAtomicService(pathInfo.atomicServiceId, servicePath, pathInfo.redirectionName);
         } else {
             String message = "Could not identify AtomicService from WSDL URL " + wsdlURL;
             logger.error(message);
@@ -425,7 +453,7 @@ public class Workflow {
     	return new VPHAtomicServiceInstance(atomicServiceId, this, servicePath);*/
     }
 
-    private String requestAtomicServiceId(String url) throws HttpException, IOException, WorkflowException {
+    private PathInfo requestPathInfo(String url) throws HttpException, IOException, WorkflowException {
         // Create request
         HttpClient client = new HttpClient();
         HttpMethod method = new GetMethod(url + "/get_path_info");
@@ -437,10 +465,24 @@ public class Workflow {
         // Execute call
         client.executeMethod(method);
         if (method.getStatusCode() == HttpStatus.SC_OK) {
-            return method.getResponseBodyAsString();
+            String body = method.getResponseBodyAsString();
+            JSONObject jsonObject = JSONObject.fromObject(body);
+            PathInfo result = new PathInfo();
+            try {
+                result.atomicServiceId = (String) PropertyUtils.getProperty(jsonObject, "atomicServiceId");
+                result.redirectionName = (String) PropertyUtils.getProperty(jsonObject, "redirectionName");
+                return result;
+            } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+                String message = "Caught exception while processing the response of \"" + method.getURI()
+                        + "\" - Response body: \"" + method.getResponseBodyAsString() + "\"";
+                logger.error(message, e);
+                throw new WorkflowException(message, e);
+            }
         } else {
-            throw new WorkflowException("Bad response while trying to find out atomicServiceId: "
-                    + method.getStatusLine() + "\n" + method.getResponseBodyAsString());
+            String message = "Bad response while trying to find out path info from \"" + method.getURI() + "\": "
+                    + method.getStatusLine() + " - Body: \"" + method.getResponseBodyAsString() + "\"";
+            logger.error(message);
+            throw new WorkflowException(message);
         }
     }
 
