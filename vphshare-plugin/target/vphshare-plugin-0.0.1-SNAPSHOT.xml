@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<plugins:plugin xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://taverna.sf.net/2008/xml/plugins http://taverna.sourceforge.net/2008/xml/plugins/plugins-2008-10-16.xsd" xmlns:plugins="http://taverna.sf.net/2008/xml/plugins">
+<provider>org.vphshare.tavernaplugin</provider>
+<identifier>org.vphshare.tavernaplugin.vphshare-plugin</identifier>
+<version>0.0.1-SNAPSHOT</version>
+<name>VPH-Share Taverna Plugin</name>
+<description/>
+<enabled>true</enabled>
+<repositories>
+<repository>http://repo1.maven.org/maven2</repository>
+<repository>http://localhost:8081/nexus/content/repositories/snapshots</repository>
+<repository>http://www.mygrid.org.uk/maven/repository</repository>
+<repository>http://repo.maven.apache.org/maven2</repository>
+<repository>http://www.mygrid.org.uk/maven/snapshot-repository</repository>
+<repository>http://uk.maven.org/maven2</repository>
+<repository>http://download.java.net/maven/2</repository>
+<repository>http://www.mygrid.org.uk/maven/biomoby/biomoby.org/m2repo</repository>
+<repository>http://openprovenance.org/java/maven-releases</repository>
+</repositories>
+<profile>
+<dependency>
+<groupId>org.vphshare.tavernaplugin</groupId>
+<artifactId>vphshare-plugin-activity</artifactId>
+<version>0.0.1-SNAPSHOT</version>
+</dependency>
+<dependency>
+<groupId>org.vphshare.tavernaplugin</groupId>
+<artifactId>vphshare-plugin-activity-ui</artifactId>
+<version>0.0.1-SNAPSHOT</version>
+</dependency>
+<dependency>
+<groupId>junit</groupId>
+<artifactId>junit</artifactId>
+<version>4.8.2</version>
+</dependency>
+</profile>
+<compatibility>
+<application>
+<version>2.3.0</version>
+</application>
+</compatibility>
+</plugins:plugin>

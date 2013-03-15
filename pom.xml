@@ -84,6 +84,24 @@
 
 	<repositories>
 		<repository>
+			<releases/>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+			<id>json</id>
+			<name>json-remote</name>
+			<url>http://repo1.maven.org/maven2</url>
+		</repository>
+		<repository>
+			<releases/>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+			<id>nexus</id>
+			<name>local-nexus</name>
+			<url>http://localhost:8081/nexus/content/repositories/snapshots</url>
+		</repository>
+		<repository>
 			<!-- The myGrid repository for Taverna dependencies -->
 			<releases/>
 			<snapshots>
